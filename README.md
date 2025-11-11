@@ -238,6 +238,19 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
     }
   ],
 
+  "resolved_entities": [    // NEW: Canonical product metadata (October 2025)
+    {
+      "name": "Apple Vision Pro",
+      "type": "product",
+      "brand": "Apple",
+      "product_name": "Vision Pro",
+      "model": null,
+      "category": "Electronics",
+      "source": "database-catalog",
+      "confidence": 0.95
+    }
+  ],
+
   "credits_used": 1,
   "credits_remaining": 99,
   "metadata": {
@@ -248,13 +261,86 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
 }
 ```
 
+### Resolved Entities Field (NEW - October 2025)
+
+The `resolved_entities` field provides canonical product metadata extracted from the query. This enables:
+
+- **Product Identification**: Exact brand, product name, and model detection
+- **Category Classification**: Automatic product category assignment
+- **Confidence Scoring**: Reliability metric for entity resolution
+- **Data Source Tracking**: Origin of product information (database-catalog, semantic-extraction, etc.)
+
+**Use Cases**:
+- Display product details in UI without re-parsing query text
+- Filter and categorize results by product metadata
+- Track which products users are searching for
+- Implement product-specific features based on category
+
+**Field Structure**:
+```typescript
+interface ResolvedEntity {
+  name: string;           // Full product name (e.g., "Apple Vision Pro")
+  type: string;           // Entity type (always "product" currently)
+  brand: string;          // Brand name (e.g., "Apple")
+  product_name: string;   // Product without brand (e.g., "Vision Pro")
+  model: string | null;   // Model identifier if applicable (e.g., "Pro", "15")
+  category: string;       // Product category (e.g., "Electronics", "Appliances")
+  source: string;         // Data source (e.g., "database-catalog")
+  confidence: number;     // Confidence score 0.0-1.0
+}
+```
+
+**Universal Category Support** (October 2025):
+The system now supports **ANY product category** without code changes:
+- Technology: iPhone, Galaxy, Pixel, MacBook
+- Appliances: Washing machines, refrigerators, dishwashers
+- Fashion: Levi's jeans, Nike sneakers, Crocs
+- Food: Oreo Thins, Lay's chips, Ben & Jerry's
+- Toys: Fisher-Price, LEGO, Hot Wheels
+- Automotive: Tesla Model 3, Ford F-150, Toyota Camry
+- Furniture: IKEA desks, Herman Miller chairs
+- **Future products automatically supported**
+
+### Optional Advanced Response Fields
+
+The ASK API includes additional optional fields that provide enhanced error handling, performance metrics, and AI feedback:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error_code` | string (optional) | Standardized error code for programmatic error handling (e.g., "INSUFFICIENT_DATA", "RATE_LIMIT") |
+| `details` | object (optional) | Additional error or debug information for troubleshooting |
+| `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
+| `data_sources` | object (optional) | Breakdown of data sources used (e.g., `{"reddit": 45, "x": 23, "youtube": 12}`) |
+| `processing_time_ms` | integer (optional) | Total request processing time in milliseconds for performance monitoring |
+
+**Example with advanced fields:**
+```json
+{
+  "success": true,
+  "query_id": "550e8400-e29b-41d4-a716-446655440000",
+  "sentiment_summary": { ... },
+  "poly_index": 78,
+
+  "data_sources": {
+    "reddit": 650,
+    "x": 400,
+    "youtube": 200
+  },
+  "processing_time_ms": 2150,
+  "poly_response": {
+    "quality_score": 0.95,
+    "model_version": "gpt-4"
+  }
+}
+```
+
 ### Example Implementation
 
 ```python
 import requests
 
 def analyze_product(product_name, api_key):
-    """Get quick insights about a product"""
+    """Get quick insights about a product with canonical metadata"""
 
     response = requests.post(
         'https://api.askpoly.ai/api/v1/frontend/ask',
@@ -267,7 +353,19 @@ def analyze_product(product_name, api_key):
         print(f"Product: {product_name}")
         print(f"Sentiment: {data['sentiment_summary']['overall_sentiment']}")
         print(f"Poly Index: {data['poly_index']}/100")
+
+        # NEW: Access canonical product metadata
+        if data.get('resolved_entities'):
+            entity = data['resolved_entities'][0]
+            print(f"Brand: {entity['brand']}")
+            print(f"Category: {entity['category']}")
+            print(f"Confidence: {entity['confidence']:.2f}")
         print(f"Trend: {data['trend']['direction']}")
+
+        # Optional: Monitor performance
+        if data.get('processing_time_ms'):
+            print(f"Processing time: {data['processing_time_ms']}ms")
+
         return data
     else:
         print(f"Error: {response.status_code}")
@@ -307,6 +405,8 @@ Perfect for: Competitive analysis, purchase decisions between alternatives, or m
 |-------|------|----------|-------------|
 | product1 | string | Yes | First product name (1-200 characters) |
 | product2 | string | Yes | Second product name (1-200 characters) |
+| session_id | string | No | Optional session ID for tracking related queries |
+| impression_id | string | No | Optional impression tracking ID for analytics |
 
 ### Response Structure
 ```json
@@ -367,6 +467,33 @@ Perfect for: Competitive analysis, purchase decisions between alternatives, or m
 
   "credits_used": 2,
   "processing_time_ms": 3450
+}
+```
+
+### Optional Advanced Response Fields
+
+The COMPARE API includes additional optional fields for enhanced functionality:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error_code` | string (optional) | Standardized error code for programmatic error handling |
+| `details` | object (optional) | Additional error or debug information |
+| `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
+| `processing_time_ms` | integer (optional) | Total request processing time in milliseconds |
+
+**Example with advanced fields:**
+```json
+{
+  "success": true,
+  "comparison_id": "660e8400-e29b-41d4-a716-446655440000",
+  "products": [...],
+  "insights": {...},
+
+  "processing_time_ms": 3450,
+  "poly_response": {
+    "quality_score": 0.92,
+    "model_version": "gpt-4"
+  }
 }
 ```
 
@@ -437,7 +564,9 @@ Perfect for: E-commerce integrations, buying guides, personalized shopping assis
 | category | string | No | Product category (auto-detected if not provided) |
 | brand_preference | string | No | Preferred brand filter |
 | session_id | string | No | Previous session ID for multi-turn conversation |
-| answers | object | No | Answers to previous clarifying questions |
+| answers | object | No | Answers to previous clarifying questions (simple key-value pairs) |
+| structured_answers | array | No | Structured clarification responses with detailed format |
+| skip_clarification | boolean | No | Skip clarification questions and return recommendations immediately (default: false) |
 
 ### Response Structure
 ```json
@@ -485,17 +614,63 @@ Perfect for: E-commerce integrations, buying guides, personalized shopping assis
     ]
   },
 
-  "next_questions": [  // Optional - for refinement
+  "next_questions": [  // Enhanced - intelligent clarification questions
     {
-      "id": "screen_size",
-      "question": "Do you prefer 14-inch portable or 16-inch larger display?",
-      "options": ["14-inch portable", "16-inch larger", "No preference"],
+      "id": "motivation",
+      "question": "What's driving your laptop search?",
+      "options": ["current laptop too slow", "need better performance for work", "upgrading old device", "first-time buyer"],
+      "type": "single_choice"
+    },
+    {
+      "id": "budget_comfort",
+      "question": "What's your budget comfort zone?",
+      "options": ["student-friendly under $800", "professional $1200-1800", "high-end $2000+"],
       "type": "single_choice"
     }
   ],
 
   "credits_used": 2,
   "processing_time_ms": 4200
+}
+```
+
+### Optional Advanced Response Fields
+
+The RECOMMEND API includes additional optional fields for enhanced functionality:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error_code` | string (optional) | Standardized error code for programmatic error handling |
+| `details` | object (optional) | Additional error or debug information |
+| `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
+| `processing_time_ms` | integer (optional) | Total request processing time in milliseconds |
+
+**Advanced Request Example:**
+```json
+{
+  "query": "best gaming laptop",
+  "skip_clarification": true,
+  "structured_answers": [
+    {
+      "question_id": "budget",
+      "answer": "under $1500"
+    }
+  ]
+}
+```
+
+**Example response with advanced fields:**
+```json
+{
+  "success": true,
+  "session_id": "770e8400-e29b-41d4-a716-446655440000",
+  "recommendations": [...],
+
+  "processing_time_ms": 4200,
+  "poly_response": {
+    "quality_score": 0.89,
+    "model_version": "gpt-4"
+  }
 }
 ```
 
@@ -578,6 +753,7 @@ Perfect for: Market research, investment analysis, strategic planning, trend rep
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | query | string | Yes | Complex question or analysis request (10-1000 characters) |
+| session_id | string | No | Optional session ID for tracking related queries |
 
 ### Response Structure
 ```json
@@ -653,6 +829,34 @@ Perfect for: Market research, investment analysis, strategic planning, trend rep
 }
 ```
 
+### Optional Advanced Response Fields
+
+The THINK API includes additional optional fields for enhanced functionality:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error_code` | string (optional) | Standardized error code for programmatic error handling |
+| `details` | object (optional) | Additional error or debug information |
+| `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
+
+**Example response with advanced fields:**
+```json
+{
+  "success": true,
+  "analysis_id": "880e8400-e29b-41d4-a716-446655440000",
+  "comprehensive_report": {...},
+  "data_analyzed": {...},
+  "processing_time_seconds": 18.5,
+  "credits_used": 3,
+
+  "poly_response": {
+    "quality_score": 0.94,
+    "model_version": "gpt-4",
+    "reasoning_depth": "comprehensive"
+  }
+}
+```
+
 ### Example Implementation
 
 ```javascript
@@ -702,6 +906,309 @@ const analysis = await deepAnalysis(
   'apk_live_your_key'
 );
 ```
+
+---
+
+## Backend Management APIs
+
+**New in January 2025**: Complete backend management capabilities for enhanced user experience and application integration.
+
+### Authentication & Session Management
+
+#### Enhanced Login with Remember Me
+```
+POST https://api.askpoly.ai/api/v1/auth/login
+```
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "remember_me": true
+}
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer",
+  "expires_in": 1209600,
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "tier": "pro",
+    "role": "admin",
+    "display_name": "John Doe"
+  }
+}
+```
+
+**Remember Me Options:**
+- `remember_me: true` → Access token: 14 days, Refresh token: 30 days
+- `remember_me: false` → Access token: 1 day, Refresh token: 7 days
+
+#### Token Refresh with Rotation
+```
+POST https://api.askpoly.ai/api/v1/auth/refresh
+```
+
+**Request Body:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**Response:** Returns new access and refresh tokens (old refresh token becomes invalid)
+
+#### Multi-Device Session Management
+```
+GET https://api.askpoly.ai/api/v1/auth/sessions
+```
+
+**Response:**
+```json
+{
+  "sessions": [
+    {
+      "session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "device_name": "Chrome on MacOS",
+      "device_type": "browser",
+      "ip_address": "192.168.1.1",
+      "created_at": "2025-01-20T10:30:00Z",
+      "last_active": "2025-01-20T15:45:00Z",
+      "is_current": true,
+      "location": "San Francisco, CA"
+    }
+  ],
+  "total_count": 1
+}
+```
+
+#### Revoke Session
+```
+DELETE https://api.askpoly.ai/api/v1/auth/sessions/{session_id}
+```
+
+#### Enhanced Logout
+```
+POST https://api.askpoly.ai/api/v1/auth/logout
+```
+
+**Request Body (Optional):**
+```json
+{
+  "logout_all": true
+}
+```
+
+### Query History Management
+
+#### List Query History with Advanced Filtering
+```
+GET https://api.askpoly.ai/api/v1/query/history
+```
+
+**Query Parameters:**
+- `limit`: Number of items (default: 50, max: 100)
+- `offset`: Pagination offset
+- `query_type`: Filter by ask/compare/recommend/think
+- `search`: Full-text search
+- `is_favorite`: Filter favorites only
+- `session_id`: Filter by session/workspace
+- `start_date`/`end_date`: Date range filtering
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "query_type": "ask",
+      "query_text": "What do people think about iPhone 15?",
+      "display_label": "iPhone 15 sentiment analysis",
+      "session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "created_at": "2025-01-20T14:30:00Z",
+      "updated_at": "2025-01-20T14:30:05Z",
+      "is_favorite": false,
+      "credits_used": 2,
+      "response_time_ms": 2500,
+      "summary": {
+        "sentiment_score": 0.75,
+        "mention_count": 156,
+        "key_insight": "Generally positive reception with concerns about price",
+        "poly_index": 8.2
+      },
+      "metadata": {
+        "source_count": 45,
+        "platforms": ["reddit", "x", "youtube"],
+        "language": "en"
+      },
+      "response_data": {
+        "poly_response": "Complete AI response preserved...",
+        "trending_topics": ["battery life", "camera quality", "price"],
+        "sources": [...]
+      }
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 5,
+    "page_size": 20,
+    "total_items": 95,
+    "has_next": true,
+    "has_previous": false
+  }
+}
+```
+
+#### Update Query History
+```
+PATCH https://api.askpoly.ai/api/v1/query/history/{query_id}
+```
+
+**Request Body:**
+```json
+{
+  "display_label": "Custom query name",
+  "is_favorite": true
+}
+```
+
+#### Delete Query History
+```
+DELETE https://api.askpoly.ai/api/v1/query/history/{query_id}
+```
+
+Performs soft delete with audit trail preservation.
+
+#### Create Query History Entry
+```
+POST https://api.askpoly.ai/api/v1/query/history
+```
+
+**Request Body:**
+```json
+{
+  "query_type": "ask",
+  "query_text": "What do people think about iPhone 15?",
+  "display_label": "iPhone 15 sentiment analysis",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "credits_used": 2,
+  "response_time_ms": 2500,
+  "summary": { "sentiment_score": 0.75, "mention_count": 156 },
+  "metadata": { "source_count": 45, "platforms": ["reddit", "x"] },
+  "response_data": { "poly_response": "Complete analysis..." }
+}
+```
+
+### Profile & Preferences Management
+
+#### Update User Profile
+```
+PATCH https://api.askpoly.ai/api/v1/auth/me
+```
+
+**Request Body:**
+```json
+{
+  "display_name": "John Doe",
+  "organization": "Acme Corp",
+  "timezone": "America/New_York",
+  "use_case": "Market research"
+}
+```
+
+#### Get User Preferences
+```
+GET https://api.askpoly.ai/api/v1/auth/preferences
+```
+
+#### Update All Preferences
+```
+PUT https://api.askpoly.ai/api/v1/auth/preferences
+```
+
+#### Partial Preference Update
+```
+PATCH https://api.askpoly.ai/api/v1/auth/preferences
+```
+
+### Usage Analytics
+
+#### Query Statistics
+```
+GET https://api.askpoly.ai/api/v1/query/stats
+```
+
+**Response:**
+```json
+{
+  "total_queries": 150,
+  "queries_by_type": {
+    "ask": 75,
+    "compare": 35,
+    "recommend": 25,
+    "think": 15
+  },
+  "total_credits_consumed": 285,
+  "queries_last_24h": 12,
+  "queries_last_7d": 47,
+  "queries_last_30d": 150,
+  "favorite_count": 18,
+  "most_frequent_topics": [
+    {"topic": "iPhone 15 vs Samsung Galaxy S24", "frequency": 8},
+    {"topic": "Best gaming laptop 2025", "frequency": 5}
+  ]
+}
+```
+
+#### Advanced Analytics
+```
+GET https://api.askpoly.ai/api/v1/query/analytics?days=30
+```
+
+**Response:**
+```json
+{
+  "usage_over_time": [
+    {"date": "2025-01-25", "queries": 15, "credits": 28},
+    {"date": "2025-01-24", "queries": 8, "credits": 12}
+  ],
+  "peak_hours": [
+    {"hour": 14, "count": 25},
+    {"hour": 10, "count": 18}
+  ],
+  "query_type_distribution": {
+    "ask": 50.0,
+    "compare": 23.3,
+    "recommend": 16.7,
+    "think": 10.0
+  },
+  "average_response_time_ms": 3250.5,
+  "success_rate": 98.7,
+  "sentiment_trends": {
+    "data": [
+      {"date": "2025-01-25", "positive": 65.2, "negative": 12.1}
+    ],
+    "trend": "positive"
+  },
+  "top_entities": [
+    {"entity": "iPhone 15", "count": 23},
+    {"entity": "Tesla Model 3", "count": 15}
+  ]
+}
+```
+
+**Benefits of Backend Management APIs:**
+- **Enhanced Security**: Multi-device session management with revocation
+- **Rich User Experience**: Complete query history with search and organization
+- **Analytics Insights**: Detailed usage patterns and trends
+- **Profile Customization**: Personalized user profiles and preferences
+- **Session Continuity**: Extended login sessions with remember me functionality
 
 ---
 
