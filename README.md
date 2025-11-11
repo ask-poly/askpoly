@@ -16,16 +16,6 @@ Whether you're a product manager tracking feature reception, a consumer research
 
 ## Getting Started
 
-### API Keys
-
-To use AskPoly APIs, you need an API key generated from your account dashboard:
-
-1. Log into your AskPoly account at https://askpoly.ai
-2. Navigate to **Settings > API Keys**
-3. Click **Generate New API Key**
-4. Copy your API key (format: `apk_live_xxxxx` for production or `apk_test_xxxxx` for testing)
-5. Store it securely - you won't be able to see it again
-
 ### Base URL
 ```
 https://api.askpoly.ai/api/v1/frontend
@@ -33,16 +23,93 @@ https://api.askpoly.ai/api/v1/frontend
 
 ### Authentication
 
-Include your API key in the Authorization header for all requests:
+AskPoly supports **two authentication methods** for maximum flexibility. Choose the method that best fits your use case:
+
+#### Method 1: JWT Token Authentication (Frontend/Web Applications)
+
+JWT tokens are ideal for browser-based applications and frontend integrations. Tokens are obtained during user login and provide session-based authentication.
+
+**When to use:**
+- Building web applications with user sessions
+- Frontend frameworks (React, Vue, Angular)
+- Mobile apps with user authentication
+
+**Header Format:**
 ```
-Authorization: Bearer apk_live_your_api_key_here
+Authorization: Bearer YOUR_JWT_TOKEN
 ```
 
-Example:
+**Example:**
 ```bash
-curl -H "Authorization: Bearer apk_live_abc123xyz789" \
-     https://api.askpoly.ai/api/v1/frontend/ask
+curl -X POST https://api.askpoly.ai/api/v1/frontend/ask \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{"query": "iPhone 16"}'
 ```
+
+---
+
+#### Method 2: API Key Authentication (Programmatic Access)
+
+API keys are designed for server-to-server integrations, scripts, and programmatic access. Generate API keys from your account dashboard.
+
+**When to use:**
+- Backend services and microservices
+- Scripts and automation tools
+- Third-party integrations
+- Command-line tools
+
+**Tier Requirements:**
+- ✅ **Pro tier and above** - Can generate and use API keys
+- ❌ **Free tier** - API key access not available
+
+**Generating an API Key:**
+1. Log into your AskPoly account at https://askpoly.ai
+2. Navigate to **Settings > API Keys**
+3. Click **Generate New API Key**
+4. Copy your API key (format: `spk_live_xxxxx` for production)
+5. Store it securely - you won't be able to see it again
+
+**Header Format:**
+```
+X-API-Key: YOUR_API_KEY
+```
+
+**Example:**
+```bash
+curl -X POST https://api.askpoly.ai/api/v1/frontend/ask \
+  -H "X-API-Key: spk_live_23aeKPBqhXwzyj3fY94_o1Ai7FzIe6zZ" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "iPhone 16"}'
+```
+
+**Python Example:**
+```python
+import requests
+
+API_KEY = "spk_live_your_api_key_here"
+
+response = requests.post(
+    "https://api.askpoly.ai/api/v1/frontend/ask",
+    headers={
+        "X-API-Key": API_KEY,
+        "Content-Type": "application/json"
+    },
+    json={"query": "iPhone 16"}
+)
+
+print(response.json())
+```
+
+---
+
+### Important Notes
+
+- **Same Endpoints, Same Responses**: All four query APIs (ASK, COMPARE, RECOMMEND, THINK) work identically with both authentication methods
+- **Same Credit Usage**: Credit deduction is identical regardless of authentication method
+- **Choose One Method**: Use either JWT token OR API key in a single request, not both
+- **Security**: Never expose API keys in client-side code or public repositories
+- **Tier Check**: API keys automatically enforce tier restrictions (free tier users cannot use API keys)
 
 ---
 
@@ -130,12 +197,12 @@ if (await checkAPIHealth()) {
 
 AskPoly provides four specialized APIs, each designed for different use cases:
 
-| API | Purpose | Credit Cost | Response Time |
-|-----|---------|-------------|---------------|
-| **ASK** | Quick sentiment analysis and insights about any product | 1 credit | 2-5 seconds |
-| **COMPARE** | Side-by-side comparison of two products | 2 credits | 3-6 seconds |
-| **RECOMMEND** | AI-powered product recommendations based on needs | 2 credits | 4-7 seconds |
-| **THINK** | Deep market analysis and comprehensive reports | 3 credits | 15-25 seconds |
+| API | Purpose | Credit Cost | Typical Response Time | Recommended Timeout |
+|-----|---------|-------------|----------------------|---------------------|
+| **ASK** | Quick sentiment analysis and insights about any product | 1 credit | 15-20 seconds | 30 seconds |
+| **COMPARE** | Side-by-side comparison of two products | 2 credits | 40-50 seconds | 90 seconds |
+| **RECOMMEND** | AI-powered product recommendations based on needs | 2 credits | 8-12 seconds | 60 seconds |
+| **THINK** | Deep market analysis and comprehensive reports | 3 credits | 50-60 seconds | 90 seconds |
 
 ---
 
@@ -344,8 +411,12 @@ def analyze_product(product_name, api_key):
 
     response = requests.post(
         'https://api.askpoly.ai/api/v1/frontend/ask',
-        headers={'Authorization': f'Bearer {api_key}'},
-        json={'query': product_name}
+        headers={
+            'X-API-Key': api_key,
+            'Content-Type': 'application/json'
+        },
+        json={'query': product_name},
+        timeout=30  # ASK API typically takes 15-20 seconds
     )
 
     if response.status_code == 200:
@@ -372,7 +443,7 @@ def analyze_product(product_name, api_key):
         return None
 
 # Usage
-result = analyze_product("Tesla Model 3", "apk_live_your_key")
+result = analyze_product("Tesla Model 3", "spk_live_your_key")
 ```
 
 ---
@@ -504,7 +575,7 @@ async function compareProducts(product1, product2, apiKey) {
   const response = await fetch('https://api.askpoly.ai/api/v1/frontend/compare', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
+      'X-API-Key': apiKey,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ product1, product2 })
@@ -694,7 +765,10 @@ class RecommendationSession:
 
         response = requests.post(
             self.base_url,
-            headers={'Authorization': f'Bearer {self.api_key}'},
+            headers={
+                'X-API-Key': self.api_key,
+                'Content-Type': 'application/json'
+            },
             json=payload
         )
 
@@ -711,7 +785,7 @@ class RecommendationSession:
         )
 
 # Usage
-session = RecommendationSession('apk_live_your_key')
+session = RecommendationSession('spk_live_your_key')
 
 # Initial recommendation
 result = session.get_recommendations('gaming laptop')
@@ -869,11 +943,11 @@ async function deepAnalysis(query, apiKey) {
     const response = await fetch('https://api.askpoly.ai/api/v1/frontend/think', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'X-API-Key': apiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ query }),
-      timeout: 30000  // 30 second timeout
+      timeout: 90000  // 90 second timeout (THINK API typically takes 50-60s)
     });
 
     const result = await response.json();
@@ -903,7 +977,7 @@ async function deepAnalysis(query, apiKey) {
 // Usage
 const analysis = await deepAnalysis(
   'What are the emerging trends in AR/VR gaming and how are consumers responding?',
-  'apk_live_your_key'
+  'spk_live_your_key'
 );
 ```
 
@@ -1270,7 +1344,7 @@ class AskPolyClient:
             return response.json()
 
         elif response.status_code == 401:
-            raise AuthenticationError('Invalid API key')
+            raise AuthenticationError('Invalid API key or JWT token')
 
         elif response.status_code == 402:
             error_data = response.json()
@@ -1298,7 +1372,10 @@ class AskPolyClient:
         try:
             response = requests.post(
                 f'{self.base_url}/ask',
-                headers={'Authorization': f'Bearer {self.api_key}'},
+                headers={
+                    'X-API-Key': self.api_key,
+                    'Content-Type': 'application/json'
+                },
                 json={'query': query},
                 timeout=10
             )
@@ -1418,6 +1495,56 @@ def track_credit_usage(response):
             'credits_used': response.get('credits_used'),
             'remaining': remaining
         })
+```
+
+### 5. Set Appropriate Request Timeouts
+
+AskPoly APIs perform deep analysis across millions of social media posts, which requires processing time. Always set appropriate timeouts to avoid premature failures:
+
+**Recommended Timeouts by API:**
+```python
+TIMEOUT_CONFIG = {
+    'ask': 30,      # ASK API: 15-20s typical, 30s timeout
+    'compare': 90,  # COMPARE API: 40-50s typical, 90s timeout
+    'recommend': 60, # RECOMMEND API: 8-12s typical, 60s timeout
+    'think': 90     # THINK API: 50-60s typical, 90s timeout
+}
+
+def make_api_request(endpoint, payload, api_key):
+    """Make API request with appropriate timeout"""
+    timeout = TIMEOUT_CONFIG.get(endpoint, 60)
+
+    response = requests.post(
+        f'https://api.askpoly.ai/api/v1/frontend/{endpoint}',
+        headers={'X-API-Key': api_key, 'Content-Type': 'application/json'},
+        json=payload,
+        timeout=timeout
+    )
+    return response.json()
+```
+
+**Why Response Times Vary:**
+- Data volume: More social media posts = longer processing
+- Query complexity: Detailed comparisons take more time
+- Real-time analysis: Fresh data requires live processing
+- AI reasoning: Deep analysis requires extensive LLM processing
+
+**Handling Timeouts:**
+```python
+import time
+
+def api_call_with_retry(endpoint, payload, api_key, max_retries=2):
+    """Retry API calls on timeout"""
+    for attempt in range(max_retries + 1):
+        try:
+            return make_api_request(endpoint, payload, api_key)
+        except requests.Timeout:
+            if attempt < max_retries:
+                wait_time = (attempt + 1) * 5  # 5s, 10s
+                print(f'Timeout occurred. Retrying in {wait_time}s...')
+                time.sleep(wait_time)
+            else:
+                raise TimeoutError(f'{endpoint.upper()} API timed out after {max_retries} retries')
 ```
 
 ---
