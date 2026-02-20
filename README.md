@@ -23,7 +23,7 @@ https://api.askpoly.ai/api/v1/frontend
 
 ### Authentication
 
-AskPoly supports **two authentication methods** for maximum flexibility. Choose the method that best fits your use case:
+AskPoly supports **three authentication methods** for maximum flexibility. Choose the method that best fits your use case:
 
 #### Method 1: JWT Token Authentication (Frontend/Web Applications)
 
@@ -103,12 +103,101 @@ print(response.json())
 
 ---
 
+#### Method 3: MCP Service-Key Authentication (AI Agent Integrations)
+
+MCP (Model Context Protocol) service keys enable service-to-service authentication for AI tools such as ChatGPT MCP servers, Cursor, and third-party AI agents. MCP requests bypass credit consumption entirely, making this ideal for platform integrations.
+
+**When to use:**
+- ChatGPT MCP server integrations
+- Cursor and other AI coding assistants
+- Third-party AI agents calling AskPoly on behalf of users
+- Any service-to-service integration where credits are managed externally
+
+**Three Required Headers:**
+
+All three headers must be present together. If the service key is provided but either identity or request ID is missing, the API returns `400 Bad Request`.
+
+| Header | Description | Example |
+|--------|-------------|---------|
+| `X-ASKPOLY-SERVICE-KEY` | Service key provided by AskPoly | `sk_mcp_your_service_key` |
+| `X-ASKPOLY-MCP-IDENTITY` | Caller identity with prefix `cgpt:` or `anon:` (max 128 chars, regex `^[a-zA-Z0-9:_-]+$`) | `cgpt:user123` or `anon:session456` |
+| `X-ASKPOLY-REQUEST-ID` | Unique UUID for request tracing | `550e8400-e29b-41d4-a716-446655440000` |
+
+**Authentication Priority:**
+
+When multiple authentication methods are present, AskPoly checks them in this order:
+1. **MCP Service Key** (`X-ASKPOLY-SERVICE-KEY`) - checked first
+2. **JWT Token** (`Authorization: Bearer ...`) - checked second
+3. **API Key** (`X-API-Key`) - checked last
+
+**Credit Bypass:**
+
+MCP requests have zero credit consumption. The response metadata includes:
+- `billing_source: "mcp_trial"` - indicates MCP billing path
+- `mcp_identity` - the caller identity passed in the request
+- `mcp_request_id` - the request ID for tracing
+
+**Example (curl):**
+```bash
+curl -X POST https://api.askpoly.ai/api/v1/frontend/ask \
+  -H "X-ASKPOLY-SERVICE-KEY: sk_mcp_your_service_key" \
+  -H "X-ASKPOLY-MCP-IDENTITY: cgpt:user123" \
+  -H "X-ASKPOLY-REQUEST-ID: 550e8400-e29b-41d4-a716-446655440000" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "iPhone 16"}'
+```
+
+**Example (Python):**
+```python
+import requests
+import uuid
+
+SERVICE_KEY = "sk_mcp_your_service_key"
+
+response = requests.post(
+    "https://api.askpoly.ai/api/v1/frontend/ask",
+    headers={
+        "X-ASKPOLY-SERVICE-KEY": SERVICE_KEY,
+        "X-ASKPOLY-MCP-IDENTITY": "cgpt:user123",
+        "X-ASKPOLY-REQUEST-ID": str(uuid.uuid4()),
+        "Content-Type": "application/json"
+    },
+    json={"query": "iPhone 16"}
+)
+
+data = response.json()
+print(f"Billing source: {data['metadata']['billing_source']}")  # "mcp_trial"
+print(f"Credits used: {data['credits_used']}")  # 0
+```
+
+**Error Responses:**
+
+| Scenario | Status | Message |
+|----------|--------|---------|
+| Service key valid but identity header missing | 400 | `MCP service-key requests require X-ASKPOLY-MCP-IDENTITY and X-ASKPOLY-REQUEST-ID headers` |
+| Service key valid but identity format invalid | 400 | `Invalid X-ASKPOLY-MCP-IDENTITY format. Must start with 'cgpt:' or 'anon:'` |
+| Identity exceeds 128 characters | 400 | `X-ASKPOLY-MCP-IDENTITY exceeds maximum length (128 chars)` |
+| Identity contains invalid characters | 400 | `X-ASKPOLY-MCP-IDENTITY contains invalid characters` |
+| Invalid service key | 401 | `Not authenticated` |
+| MCP_SERVICE_KEY not configured on server | 401 | `Not authenticated` |
+
+**Supported Endpoints:**
+
+All four query APIs support MCP service-key authentication:
+- `POST /api/v1/frontend/ask` (0 credits via MCP)
+- `POST /api/v1/frontend/compare` (0 credits via MCP)
+- `POST /api/v1/frontend/recommend` (0 credits via MCP)
+- `POST /api/v1/frontend/think` (0 credits via MCP)
+
+---
+
 ### Important Notes
 
-- **Same Endpoints, Same Responses**: All four query APIs (ASK, COMPARE, RECOMMEND, THINK) work identically with both authentication methods
-- **Same Credit Usage**: Credit deduction is identical regardless of authentication method
-- **Choose One Method**: Use either JWT token OR API key in a single request, not both
-- **Security**: Never expose API keys in client-side code or public repositories
+- **Same Endpoints, Same Responses**: All four query APIs (ASK, COMPARE, RECOMMEND, THINK) work identically with all authentication methods
+- **Same Credit Usage**: Credit deduction is identical for JWT and API key methods
+- **MCP Service Key**: For AI agent integrations (ChatGPT MCP, Cursor, third-party agents), use the MCP service key method. All three headers (`X-ASKPOLY-SERVICE-KEY`, `X-ASKPOLY-MCP-IDENTITY`, `X-ASKPOLY-REQUEST-ID`) are required together. MCP requests bypass credit consumption.
+- **Choose One Method**: Use JWT token, API key, or MCP service key in a single request - not multiple methods simultaneously
+- **Security**: Never expose API keys or service keys in client-side code or public repositories
 - **Tier Check**: API keys automatically enforce tier restrictions (free tier users cannot use API keys)
 
 ---
@@ -203,6 +292,8 @@ AskPoly provides four specialized APIs, each designed for different use cases:
 | **COMPARE** | Side-by-side comparison of two products | 2 credits | 40-50 seconds | 90 seconds |
 | **RECOMMEND** | AI-powered product recommendations based on needs | 2 credits | 8-12 seconds | 60 seconds |
 | **THINK** | Deep market analysis and comprehensive reports | 3 credits | 50-60 seconds | 90 seconds |
+
+> **MCP Service-Key Note:** All four APIs support MCP service-key authentication with **zero credit cost**. When authenticated via MCP service key, the `credits_used` field returns `0` and `billing_source` is set to `"mcp_trial"` in response metadata. See [Method 3: MCP Service-Key Authentication](#method-3-mcp-service-key-authentication-ai-agent-integrations) for details.
 
 ---
 
@@ -1286,6 +1377,50 @@ GET https://api.askpoly.ai/api/v1/query/analytics?days=30
 
 ---
 
+## Popular Searches API
+
+### What It Does
+The Popular Searches API returns trending product searches across the AskPoly platform. Results are privacy-filtered to remove any personally identifiable information and aggregated to show community-level trends.
+
+**No authentication required** - this is a public endpoint.
+
+### Endpoint
+```
+GET /api/v1/public/popular-searches
+```
+
+### Example Request
+```bash
+curl https://api.askpoly.ai/api/v1/public/popular-searches
+```
+
+### Example Response
+```json
+{
+  "success": true,
+  "popular_searches": [
+    {
+      "query": "iPhone 16",
+      "search_count": 245,
+      "category": "Electronics"
+    },
+    {
+      "query": "Tesla Model 3",
+      "search_count": 189,
+      "category": "Automotive"
+    }
+  ],
+  "updated_at": "2026-02-20T10:00:00Z"
+}
+```
+
+### Use Cases
+- Display trending searches on your application's landing page
+- Suggest popular queries to new users
+- Monitor market interest trends across product categories
+
+---
+
 ## Error Handling
 
 ### Common Error Responses
@@ -1394,9 +1529,11 @@ class AskPolyClient:
 | Plan | Requests/Minute | Daily Credits | Concurrent Requests |
 |------|----------------|---------------|-------------------|
 | Free | 10 | 10 | 1 |
-| Starter | 30 | 100 | 3 |
+| PAYG | 20 | Pay-per-use | 2 |
 | Pro | 60 | 500 | 5 |
+| Business | 120 | 1000 | 10 |
 | Enterprise | 300 | Unlimited | 20 |
+| MCP Service | 60 | Unlimited (bypass) | 5 |
 
 ---
 
@@ -1570,6 +1707,54 @@ When reporting issues, please include:
 ---
 
 ## Changelog
+
+### v2.11.0 (February 2026)
+- BYOK (Bring Your Own Key) Upload-Post integration
+- Social sharing with user's own API key support
+
+### v2.10.0 (February 2026)
+- Compare API Phase 2: word boundary matching for entity resolution
+- Confidence gating for comparison results
+- Entity resolution cache aliasing for faster lookups
+
+### v2.9.9 (January 2026)
+- **MCP Service-Key Credit Bypass** for all query APIs (Ask, Compare, Recommend, Think)
+- Service-to-service authentication via `X-ASKPOLY-SERVICE-KEY` header
+- Zero credit consumption for MCP-authenticated requests
+- `billing_source: "mcp_trial"` in response metadata
+
+### v2.9.0 (January 2026)
+- AI/GPT products enrichment system with custom JSON support
+- 110+ products from OpenAI, Anthropic, Google, Meta, and more
+
+### v2.8.0 (January 2026)
+- Relevant hashtags added to social share posts
+
+### v2.7.0 (January 2026)
+- Sentiment pipeline fix achieving 100% coverage for sentiment scores
+
+### v2.6.0 (December 2025)
+- Infographic generation with logo support
+- Product abbreviation handling improvements
+
+### v2.5.0 (November 2025)
+- Amazon Reviews real-time integration
+
+### v2.4.0 (November 2025)
+- Popular Searches public API (`GET /api/v1/public/popular-searches`)
+- No authentication required, privacy-filtered results
+
+### v2.3.0 (November 2025)
+- Hybrid authentication (API key + JWT) for all query endpoints
+- Share-to-Earn v2.2 security fix
+
+### v2.2.0 (October 2025)
+- Universal entity resolution supporting any product category
+- Trends rollup system for historical sentiment tracking
+
+### v2.1.0 (October 2025)
+- `resolved_entities` field added to all API responses
+- Brand relationships and canonical product metadata
 
 ### v1.1.0 (September 2025)
 - Enhanced ASK API with structured JSON responses
