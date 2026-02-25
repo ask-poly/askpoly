@@ -2,7 +2,7 @@
 
 ## About AskPoly
 
-AskPoly is an AI-powered sentiment analysis platform that transforms real-time social media conversations into actionable product insights. By analyzing millions of discussions across Reddit, X (Twitter), and YouTube, AskPoly helps businesses, researchers, and consumers understand authentic public opinion about products, brands, and market trends.
+AskPoly is an AI-powered sentiment analysis platform that transforms real-time social media conversations into actionable product insights. By analyzing millions of discussions across Reddit, X (Twitter), YouTube, and Amazon Reviews, AskPoly helps businesses, researchers, and consumers understand authentic public opinion about products, brands, and market trends.
 
 Our platform uses advanced natural language processing and machine learning to:
 - **Analyze sentiment** across multiple social platforms in real-time
@@ -303,9 +303,11 @@ AskPoly provides four specialized APIs, each designed for different use cases:
 The ASK API is your go-to endpoint for quick sentiment analysis about any product or brand. It analyzes the last 30 days of social media discussions to provide:
 - Overall sentiment scores and distribution
 - Key themes in user discussions
-- Actual user quotes and opinions
+- Actual user quotes and opinions (tagged as `verified_post` or `ai_summary`)
 - Trending indicators and momentum
 - Platform-specific sentiment breakdown
+- Source transparency with post counts, platform breakdown, and confidence indicators
+- Deterministic product resolution via Amazon ASIN/URL (optional)
 
 Perfect for: Product managers monitoring launches, marketers tracking brand perception, or consumers researching purchases.
 
@@ -323,6 +325,21 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | query | string | Yes | Product or brand name to analyze (1-500 characters) |
+| product_url | string | No | Amazon product URL or raw 10-character ASIN for deterministic product resolution. When provided, bypasses AI-based product detection and resolves the exact product from our database. Accepted formats: Amazon URL (`https://www.amazon.com/dp/B0CHWT34ZD`), Amazon URL with slug, international Amazon domains, or raw ASIN (`B0CHWT34ZD`). |
+| session_id | string | No | Session ID for multi-turn conversations |
+
+**ASIN/URL Resolution Behavior:**
+- **ASIN found**: Query resolves to the exact product. Zero guessing, zero credits wasted on wrong product.
+- **ASIN not found**: Returns a conversational response (success=true, 0 credits) suggesting the product has been queued for analysis.
+- **Invalid/unparseable input**: The `product_url` field is ignored and the query falls through to normal analysis.
+
+**Example with ASIN:**
+```json
+{
+  "query": "What do people think?",
+  "product_url": "https://www.amazon.com/dp/B0CHWT34ZD"
+}
+```
 
 ### Response Structure
 ```json
@@ -388,6 +405,7 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
       "source": "r/AppleVisionPro",
       "content": "After a month of daily use, the Vision Pro has completely changed...",
       "sentiment": "positive",
+      "source_type": "verified_post",
       "engagement_metrics": {
         "likes": 234,
         "comments": 45
@@ -468,21 +486,84 @@ The ASK API includes additional optional fields that provide enhanced error hand
 | `error_code` | string (optional) | Standardized error code for programmatic error handling (e.g., "INSUFFICIENT_DATA", "RATE_LIMIT") |
 | `details` | object (optional) | Additional error or debug information for troubleshooting |
 | `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
-| `data_sources` | object (optional) | Breakdown of data sources used (e.g., `{"reddit": 45, "x": 23, "youtube": 12}`) |
+| `data_sources` | object (optional) | Source transparency: post counts, platform breakdown, date range, and confidence indicator (see below) |
 | `processing_time_ms` | integer (optional) | Total request processing time in milliseconds for performance monitoring |
+
+### Source Transparency: `data_sources` Field (NEW - February 2026)
+
+Every successful ASK response includes a `data_sources` object with provenance metadata so users can verify the data behind the analysis. When no meaningful data is found, the field is `null`.
+
+**`data_sources` Structure:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_posts` | integer | Total number of posts analyzed |
+| `platform_breakdown` | object | Post count per platform (e.g., `{"reddit": 412, "x": 203}`) |
+| `date_range.start` | string (ISO 8601) | Earliest post date in the analysis window |
+| `date_range.end` | string (ISO 8601) | Latest post date in the analysis window |
+| `low_confidence` | boolean | `true` when `total_posts < 20` -- indicates limited data |
+| `message` | string (optional) | Warning text when `low_confidence` is `true` |
+
+**Example (normal confidence):**
+```json
+{
+  "data_sources": {
+    "total_posts": 847,
+    "platform_breakdown": {
+      "reddit": 412,
+      "x": 203,
+      "youtube": 132,
+      "amazon": 100
+    },
+    "date_range": {
+      "start": "2026-01-26T00:00:00+00:00",
+      "end": "2026-02-25T14:30:00+00:00"
+    },
+    "low_confidence": false
+  }
+}
+```
+
+**Example (low confidence -- limited data):**
+```json
+{
+  "data_sources": {
+    "total_posts": 12,
+    "platform_breakdown": { "reddit": 8, "amazon": 4 },
+    "date_range": {
+      "start": "2026-02-10T00:00:00+00:00",
+      "end": "2026-02-25T14:30:00+00:00"
+    },
+    "low_confidence": true,
+    "message": "Limited data available -- results may not be representative."
+  }
+}
+```
+
+### Quote Source Types (NEW - February 2026)
+
+Each item in `quote_samples` now includes a `source_type` field indicating data provenance:
+
+| Value | Description |
+|-------|-------------|
+| `verified_post` | Direct quote from a real user post verified in our database |
+| `ai_summary` | Synthesized from narrative analysis (AI-generated summary) |
+
+This allows integrators to distinguish between verified user quotes and AI-summarized insights.
 
 **Example with advanced fields:**
 ```json
 {
   "success": true,
   "query_id": "550e8400-e29b-41d4-a716-446655440000",
-  "sentiment_summary": { ... },
+  "sentiment_summary": { "..." : "..." },
   "poly_index": 78,
 
   "data_sources": {
-    "reddit": 650,
-    "x": 400,
-    "youtube": 200
+    "total_posts": 1250,
+    "platform_breakdown": { "reddit": 650, "x": 400, "youtube": 200 },
+    "date_range": { "start": "2026-01-26T00:00:00Z", "end": "2026-02-25T14:30:00Z" },
+    "low_confidence": false
   },
   "processing_time_ms": 2150,
   "poly_response": {
@@ -497,8 +578,12 @@ The ASK API includes additional optional fields that provide enhanced error hand
 ```python
 import requests
 
-def analyze_product(product_name, api_key):
+def analyze_product(product_name, api_key, asin=None):
     """Get quick insights about a product with canonical metadata"""
+
+    payload = {'query': product_name}
+    if asin:
+        payload['product_url'] = asin  # Deterministic resolution via ASIN
 
     response = requests.post(
         'https://api.askpoly.ai/api/v1/frontend/ask',
@@ -506,7 +591,7 @@ def analyze_product(product_name, api_key):
             'X-API-Key': api_key,
             'Content-Type': 'application/json'
         },
-        json={'query': product_name},
+        json=payload,
         timeout=30  # ASK API typically takes 15-20 seconds
     )
 
@@ -516,13 +601,20 @@ def analyze_product(product_name, api_key):
         print(f"Sentiment: {data['sentiment_summary']['overall_sentiment']}")
         print(f"Poly Index: {data['poly_index']}/100")
 
-        # NEW: Access canonical product metadata
+        # Access canonical product metadata
         if data.get('resolved_entities'):
             entity = data['resolved_entities'][0]
             print(f"Brand: {entity['brand']}")
             print(f"Category: {entity['category']}")
             print(f"Confidence: {entity['confidence']:.2f}")
         print(f"Trend: {data['trend']['direction']}")
+
+        # Source transparency: check data provenance
+        if data.get('data_sources'):
+            ds = data['data_sources']
+            print(f"Based on {ds['total_posts']} posts across {list(ds['platform_breakdown'].keys())}")
+            if ds.get('low_confidence'):
+                print(f"WARNING: {ds['message']}")
 
         # Optional: Monitor performance
         if data.get('processing_time_ms'):
@@ -533,8 +625,113 @@ def analyze_product(product_name, api_key):
         print(f"Error: {response.status_code}")
         return None
 
-# Usage
+# Usage - by product name
 result = analyze_product("Tesla Model 3", "spk_live_your_key")
+
+# Usage - by Amazon ASIN (deterministic, no guessing)
+result = analyze_product("What do people think?", "spk_live_your_key", asin="B0CHWT34ZD")
+```
+
+---
+
+## 1b. SOURCES API - View Raw Posts Behind an Analysis
+
+### What It Does
+The SOURCES API provides full transparency by returning the actual posts that contributed to a query's sentiment analysis. After running an ASK query, use the returned `query_id` to fetch the source posts with content snippets, platform, direct URLs, sentiment scores, and author info.
+
+Perfect for: Data verification, auditing analysis results, building trust with end users, or exporting source data.
+
+### Endpoint
+`GET /api/v1/frontend/sources/{query_id}`
+
+### Parameters
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| query_id | string (UUID) | Yes | The `query_id` from a previous ASK response (path parameter) |
+
+### Response Structure
+```json
+{
+  "query_id": "550e8400-e29b-41d4-a716-446655440000",
+  "sources": [
+    {
+      "post_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "platform": "reddit",
+      "url": "https://reddit.com/r/product/comments/abc123",
+      "content_snippet": "I've been using this product for 3 months and the battery life is incredible. The only downside is the weight when...",
+      "date": "2026-02-20T15:30:00+00:00",
+      "sentiment_score": 0.78,
+      "sentiment_label": "positive",
+      "author": "user123"
+    },
+    {
+      "post_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "platform": "amazon",
+      "url": "https://www.amazon.com/review/R1ABC2DEF3GHI",
+      "content_snippet": "Not worth the price. The build quality is cheap and it broke after two weeks...",
+      "date": "2026-02-18T09:15:00+00:00",
+      "sentiment_score": 0.22,
+      "sentiment_label": "negative",
+      "author": "verified_buyer_42"
+    }
+  ],
+  "total": 47
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query_id` | string (UUID) | The query this source data belongs to |
+| `sources` | array | List of source posts (max 100) |
+| `sources[].post_id` | string (UUID) | Unique post identifier |
+| `sources[].platform` | string | Source platform: `reddit`, `x`, `youtube`, `amazon` |
+| `sources[].url` | string | Direct link to the original post (empty string if unavailable) |
+| `sources[].content_snippet` | string | First 300 characters of post content (truncated with "...") |
+| `sources[].date` | string (ISO 8601) or null | Post publication date |
+| `sources[].sentiment_score` | float or null | Sentiment score 0.0 (negative) to 1.0 (positive) |
+| `sources[].sentiment_label` | string | `positive`, `negative`, `neutral`, or `mixed` |
+| `sources[].author` | string | Author username or `anonymous` |
+| `total` | integer | Total number of source posts returned |
+| `message` | string (optional) | Present when no sources are available |
+
+### Error Responses
+
+| Status | Scenario |
+|--------|----------|
+| 400 | Invalid `query_id` format (not a valid UUID) |
+| 404 | Query not found or does not belong to the authenticated user |
+
+### Example Implementation
+
+```python
+def get_analysis_sources(query_id, api_key):
+    """Fetch raw posts used in an analysis for verification"""
+
+    response = requests.get(
+        f'https://api.askpoly.ai/api/v1/frontend/sources/{query_id}',
+        headers={'X-API-Key': api_key}
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        print(f"Found {data['total']} source posts")
+
+        for source in data['sources']:
+            print(f"  [{source['platform']}] {source['sentiment_label']}: {source['content_snippet'][:80]}...")
+            if source['url']:
+                print(f"    Link: {source['url']}")
+
+        return data
+    else:
+        print(f"Error: {response.status_code}")
+        return None
+
+# Usage: first run an ASK query, then fetch sources
+ask_result = analyze_product("iPhone 16", "spk_live_your_key")
+if ask_result and ask_result['success']:
+    sources = get_analysis_sources(ask_result['query_id'], "spk_live_your_key")
 ```
 
 ---
@@ -1106,7 +1303,8 @@ POST https://api.askpoly.ai/api/v1/auth/login
     "email": "user@example.com",
     "tier": "pro",
     "role": "admin",
-    "display_name": "John Doe"
+    "display_name": "John Doe",
+    "onboarding_completed": true
   }
 }
 ```
@@ -1185,6 +1383,27 @@ GET https://api.askpoly.ai/api/v1/query/history
 - `is_favorite`: Filter favorites only
 - `session_id`: Filter by session/workspace
 - `start_date`/`end_date`: Date range filtering
+
+#### Get Query Detail with Session Fallback (Updated February 2026)
+```
+GET https://api.askpoly.ai/api/v1/query/history/{query_id}?session_id={session_id}
+```
+
+**Query Parameters:**
+- `session_id` (optional): Session UUID for fallback lookup. If the primary `query_id` lookup fails (404), the API automatically retries using `session_id` to find the most recent query in that session.
+
+**Structured 404 Response:**
+When a query is not found by either method, the API returns a structured error:
+```json
+{
+  "detail": {
+    "error": "query_not_found",
+    "looked_up_as": "query_id",
+    "query_id": "550e8400-e29b-41d4-a716-446655440000",
+    "suggestion": "Try passing ?session_id=<session_id> for session-based lookup"
+  }
+}
+```
 
 **Response:**
 ```json
@@ -1301,6 +1520,41 @@ PUT https://api.askpoly.ai/api/v1/auth/preferences
 ```
 PATCH https://api.askpoly.ai/api/v1/auth/preferences
 ```
+
+#### Get Onboarding Status (NEW - February 2026)
+```
+GET https://api.askpoly.ai/api/v1/auth/preferences/onboarding
+```
+
+**Response:**
+```json
+{
+  "onboarding_completed": false,
+  "onboarding_completed_at": null
+}
+```
+
+#### Complete Onboarding (NEW - February 2026)
+```
+POST https://api.askpoly.ai/api/v1/auth/preferences/onboarding
+```
+
+**Request Body:**
+```json
+{
+  "completed": true
+}
+```
+
+**Response:**
+```json
+{
+  "onboarding_completed": true,
+  "onboarding_completed_at": "2026-02-25T14:30:00+00:00"
+}
+```
+
+The `onboarding_completed` field is also returned in the login response and `GET /me` response, allowing frontends to gate the onboarding flow immediately after authentication.
 
 ### Usage Analytics
 
@@ -1707,6 +1961,16 @@ When reporting issues, please include:
 ---
 
 ## Changelog
+
+### v2.12.0 (February 2026)
+- **Strict Grounding Contract**: Deterministic product matching with phrase-first retrieval, required-token validation, and taxonomy-gated expansion. Eliminates AI hallucinations where queries returned wrong products.
+- **ASIN/URL Input**: New `product_url` field on ASK API for deterministic product resolution via Amazon ASIN. Bypasses all AI guessing.
+- **Source Transparency**: New `data_sources` field in ASK response with post counts, platform breakdown, date range, and `low_confidence` warning. New `source_type` field on quotes (`verified_post` vs `ai_summary`).
+- **Sources Endpoint**: New `GET /api/v1/frontend/sources/{query_id}` returns raw posts used in analysis with content snippets, URLs, sentiment, and author info.
+- **Onboarding Backend**: New `onboarding_completed` field in login/me responses. New `GET/POST /api/v1/auth/preferences/onboarding` endpoints.
+- **Recommend Fix**: Fixed blank results by adding date window fallback (90d -> 180d -> 365d) and proper error logging.
+- **Query History 404 Fix**: Added `session_id` fallback lookup and structured 404 responses for saved query retrieval.
+- **Grok Fallback Disabled**: In strict grounding mode, AI fallback no longer fabricates sentiment data for unknown products. Ungrounded queries return 0 credits.
 
 ### v2.11.0 (February 2026)
 - BYOK (Bring Your Own Key) Upload-Post integration
