@@ -307,7 +307,7 @@ The ASK API is your go-to endpoint for quick sentiment analysis about any produc
 - Trending indicators and momentum
 - Platform-specific sentiment breakdown
 - Source transparency with post counts, platform breakdown, and confidence indicators
-- Deterministic product resolution via Amazon ASIN/URL (optional)
+- Deterministic product resolution via ASIN/URL (Amazon and non-Amazon retailers)
 
 Perfect for: Product managers monitoring launches, marketers tracking brand perception, or consumers researching purchases.
 
@@ -325,19 +325,29 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | query | string | Yes | Product or brand name to analyze (1-500 characters) |
-| product_url | string | No | Amazon product URL or raw 10-character ASIN for deterministic product resolution. When provided, bypasses AI-based product detection and resolves the exact product from our database. Accepted formats: Amazon URL (`https://www.amazon.com/dp/B0CHWT34ZD`), Amazon URL with slug, international Amazon domains, or raw ASIN (`B0CHWT34ZD`). |
+| product_url | string | No | Product URL or raw 10-character ASIN for deterministic product resolution. When provided, bypasses AI-based product detection and resolves the exact product from our database. Accepted formats: Amazon URL (`https://www.amazon.com/dp/B0CHWT34ZD`), Amazon URL with slug, international Amazon domains, raw ASIN (`B0CHWT34ZD`), or non-Amazon retailer URLs (Best Buy, Walmart, Target, etc.). Non-Amazon URLs are matched by URL fingerprint to existing discovery records. |
 | session_id | string | No | Session ID for multi-turn conversations |
 
 **ASIN/URL Resolution Behavior:**
-- **ASIN found**: Query resolves to the exact product. Zero guessing, zero credits wasted on wrong product.
-- **ASIN not found**: Returns a conversational response (success=true, 0 credits) suggesting the product has been queued for analysis.
-- **Invalid/unparseable input**: The `product_url` field is ignored and the query falls through to normal analysis.
+- **ASIN/URL found**: Query resolves to the exact product. Zero guessing, zero credits wasted on wrong product.
+- **ASIN/URL not found**: Returns a conversational response (success=true, 0 credits) with a `guidance` object indicating the product has been queued for discovery. See [Guidance Response Field](#guidance-response-field-new---v2130) below.
+- **Non-Amazon URL**: Matched by URL fingerprint (SHA-256 hash). If no existing discovery record exists, the product is queued for analysis.
+- **Invalid/unparseable Amazon URL**: Returns a `guidance` object with `type: "unparseable_amazon_url"`.
+- **Unsupported URL domain**: Returns a `guidance` object with `type: "unsupported_product_url"` and queues the product for discovery when a product name can be extracted from the URL slug.
 
-**Example with ASIN:**
+**Example with Amazon ASIN:**
 ```json
 {
   "query": "What do people think?",
   "product_url": "https://www.amazon.com/dp/B0CHWT34ZD"
+}
+```
+
+**Example with non-Amazon URL:**
+```json
+{
+  "query": "What do people think?",
+  "product_url": "https://www.bestbuy.com/site/sony-wh-1000xm5/6505727.p"
 }
 ```
 
@@ -573,6 +583,69 @@ This allows integrators to distinguish between verified user quotes and AI-summa
 }
 ```
 
+### Guidance Response Field (NEW - v2.13.0)
+
+When the API cannot return a normal data-driven response (e.g., product not yet in our database, URL not recognized, discovery still in progress), the response includes a `guidance` object instead of sentiment data. The response will have `success: true` and `credits_used: 0`.
+
+**All APIs (ASK, COMPARE, THINK) return the same guidance types.**
+
+| Guidance Type | When Returned | Key Fields | User Action |
+|---------------|---------------|------------|-------------|
+| `asin_pending` | ASIN/URL found but no data yet; queued for discovery | `asin`, `discovery_queued`, `discovery_id`, `next_check_seconds` | Retry after `next_check_seconds` (typically 7200s / 2 hours) |
+| `unsupported_product_url` | Non-Amazon URL from an unsupported retailer | `discovery_queued` | If `discovery_queued: true`, retry in 2 hours; otherwise show error |
+| `unparseable_amazon_url` | Amazon URL but ASIN could not be extracted | - | Ask user to paste the full product page URL or enter ASIN directly |
+| `discovery_indexing` | Product data exists but is still being indexed | `product_name`, `post_count_total` | Retry in 10-20 minutes |
+| `discovery_in_progress` | Social crawls are actively running | `status` | Retry in 1-2 hours |
+| `no_data_discovery` | No data found; product queued for discovery | `discovery_queued` | If `discovery_queued: true`, retry in 2 hours; otherwise product may not exist |
+
+**Example guidance response:**
+```json
+{
+  "success": true,
+  "query_id": "550e8400-e29b-41d4-a716-446655440000",
+  "query_text": "What do people think?",
+  "credits_used": 0,
+  "guidance": {
+    "type": "asin_pending",
+    "asin": "B0CHWT34ZD",
+    "grounded": false,
+    "meaningful_response": false,
+    "discovery_queued": true,
+    "discovery_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "next_check_seconds": 7200
+  }
+}
+```
+
+**Handling guidance in code:**
+```python
+data = response.json()
+if data.get('guidance'):
+    guidance = data['guidance']
+    if guidance['type'] == 'asin_pending':
+        # Show "queued for analysis" message, schedule retry
+        retry_after = guidance.get('next_check_seconds', 7200)
+    elif guidance['type'] in ('discovery_indexing', 'discovery_in_progress'):
+        # Show "data being collected" progress indicator
+        pass
+    elif guidance['type'] == 'no_data_discovery':
+        if guidance.get('discovery_queued'):
+            # Show "we're collecting data, check back later"
+            pass
+        else:
+            # Show "product not found" message
+            pass
+    elif guidance['type'] == 'unparseable_amazon_url':
+        # Ask user to correct the URL
+        pass
+    elif guidance['type'] == 'unsupported_product_url':
+        # Show "URL not supported" with optional retry if discovery_queued
+        pass
+else:
+    # Normal data-driven response -- render sentiment, quotes, etc.
+    pass
+```
+
 ### Example Implementation
 
 ```python
@@ -759,13 +832,26 @@ Perfect for: Competitive analysis, purchase decisions between alternatives, or m
 }
 ```
 
+**Example with product URLs (NEW - v2.13.0):**
+```json
+{
+  "product1": "Sony WH-1000XM5",
+  "product1_url": "https://www.amazon.com/dp/B0BX2L8PBT",
+  "product2": "Bose QuietComfort Ultra",
+  "product2_url": "https://www.bestbuy.com/site/bose-quietcomfort-ultra/6554461.p"
+}
+```
+
 ### Parameters
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| product1 | string | Yes | First product name (1-200 characters) |
-| product2 | string | Yes | Second product name (1-200 characters) |
+| product1 | string | Conditional | First product name (1-200 characters). Required if `product1_url` is not provided. |
+| product2 | string | Conditional | Second product name (1-200 characters). Required if `product2_url` is not provided. |
+| product1_url | string | No | Product URL or ASIN for first product. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, or non-Amazon retailer URLs). When provided, `product1` name is optional. |
+| product2_url | string | No | Product URL or ASIN for second product. Same format as `product1_url`. When provided, `product2` name is optional. |
 | session_id | string | No | Optional session ID for tracking related queries |
 | impression_id | string | No | Optional impression tracking ID for analytics |
+| request_id | string | No | Frontend-generated request ID (ULID) for progress tracking and idempotency. Prevents duplicate processing if the same request is retried. |
 
 ### Response Structure
 ```json
@@ -825,9 +911,31 @@ Perfect for: Competitive analysis, purchase decisions between alternatives, or m
   },
 
   "credits_used": 2,
-  "processing_time_ms": 3450
+  "credits_remaining": 97,
+  "credits_version": 42,
+  "processing_time_ms": 3450,
+
+  "hashtags": ["#iPhone15Pro", "#GalaxyS24", "#Smartphones", "#AskPoly"],
+
+  "guidance": null,
+
+  "metadata": {
+    "processing_time_ms": 3450,
+    "discovery_status": {
+      "product1_queued": false,
+      "product2_queued": false
+    }
+  }
 }
 ```
+
+### Compare API Guidance (NEW - v2.13.0)
+
+The Compare API returns the same `guidance` types as the ASK API (see [Guidance Response Field](#guidance-response-field-new---v2130)). When one or both products cannot be resolved:
+
+- If **both products** have zero data and are in fallback mode, `credits_used` returns `0` (zero-credit guard).
+- Each product's discovery status is tracked in `metadata.discovery_status` (`product1_queued`, `product2_queued`).
+- The `guidance` object indicates why data could not be returned and what action to take.
 
 ### Optional Advanced Response Fields
 
@@ -839,6 +947,11 @@ The COMPARE API includes additional optional fields for enhanced functionality:
 | `details` | object (optional) | Additional error or debug information |
 | `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
 | `processing_time_ms` | integer (optional) | Total request processing time in milliseconds |
+| `guidance` | object (optional) | Query guidance when normal comparison is not possible. Same types as ASK API. |
+| `hashtags` | array of strings | Backend-generated hashtags for social sharing (always a list, never null) |
+| `credits_remaining` | integer (optional) | User's remaining credit balance after this request |
+| `credits_version` | integer (optional) | Version number for credit consistency across API + WebSocket |
+| `metadata.discovery_status` | object (optional) | `product1_queued` and `product2_queued` booleans indicating whether discovery was triggered |
 
 **Example with advanced fields:**
 ```json
@@ -1111,11 +1224,20 @@ Perfect for: Market research, investment analysis, strategic planning, trend rep
 }
 ```
 
+**Example with product URL (NEW - v2.13.0):**
+```json
+{
+  "query": "What are the long-term reliability trends?",
+  "product_url": "https://www.amazon.com/dp/B0BX2L8PBT"
+}
+```
+
 ### Parameters
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| query | string | Yes | Complex question or analysis request (10-1000 characters) |
+| query | string | Conditional | Complex question or analysis request (10-1000 characters). Required if `product_url` is not provided. |
 | session_id | string | No | Optional session ID for tracking related queries |
+| product_url | string | No | Product URL or ASIN for deterministic product resolution. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, or non-Amazon retailer URLs). When provided, `query` is optional. |
 
 ### Response Structure
 ```json
@@ -1191,6 +1313,10 @@ Perfect for: Market research, investment analysis, strategic planning, trend rep
 }
 ```
 
+### Think API Guidance (NEW - v2.13.0)
+
+The THINK API returns the same `guidance` types as the ASK API when `product_url` is provided but the product cannot be resolved. See [Guidance Response Field](#guidance-response-field-new---v2130) for the full list. When guidance is returned, `credits_used` is `0`.
+
 ### Optional Advanced Response Fields
 
 The THINK API includes additional optional fields for enhanced functionality:
@@ -1200,6 +1326,9 @@ The THINK API includes additional optional fields for enhanced functionality:
 | `error_code` | string (optional) | Standardized error code for programmatic error handling |
 | `details` | object (optional) | Additional error or debug information |
 | `poly_response` | object (optional) | Poly AI feedback system data including quality scores and model metadata |
+| `guidance` | object (optional) | Query guidance when deep analysis is not possible. Same types as ASK API. |
+| `hashtags` | array of strings | Backend-generated hashtags for social sharing (always a list, never null) |
+| `credits_remaining` | integer (optional) | User's remaining credit balance after this request |
 
 **Example response with advanced fields:**
 ```json
@@ -1961,6 +2090,17 @@ When reporting issues, please include:
 ---
 
 ## Changelog
+
+### v2.13.1 (February 2026)
+- **Post-Discovery Cleanup**: Removed dead `_register_unknown_product` code path from Compare API. Fixed async race condition on `discovery_queued` flag (fire-and-forget replaced with await + timeout). Threaded `trigger_source` through entire crawl pipeline for end-to-end observability.
+- **Breaking Metadata Change**: Compare API `metadata.crawler_trigger_status` replaced with `metadata.discovery_status` containing `product1_queued` and `product2_queued` booleans.
+
+### v2.13.0 (February 2026)
+- **ASIN/URL Input Expansion**: All three query APIs (ASK, COMPARE, THINK) now accept product URLs for deterministic resolution. New fields: `product_url` on ASK/THINK, `product1_url`/`product2_url` on COMPARE.
+- **Non-Amazon URL Support**: Best Buy, Walmart, Target, and other retailer URLs are matched by URL fingerprint (SHA-256 hash) to existing discovery records. Unknown URLs trigger automatic discovery.
+- **Guidance Response Field**: New `guidance` object returned when normal data-driven responses are not possible (6 types: `asin_pending`, `unsupported_product_url`, `unparseable_amazon_url`, `discovery_indexing`, `discovery_in_progress`, `no_data_discovery`).
+- **Zero-Credit Discovery Guard**: When products are in discovery/fallback mode with no data, `credits_used` returns `0` across all APIs.
+- **Compare API Enhancements**: New `request_id` field for idempotency/progress tracking. New `hashtags`, `credits_remaining`, `credits_version` response fields.
 
 ### v2.12.0 (February 2026)
 - **Strict Grounding Contract**: Deterministic product matching with phrase-first retrieval, required-token validation, and taxonomy-gated expansion. Eliminates AI hallucinations where queries returned wrong products.
