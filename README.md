@@ -2,7 +2,7 @@
 
 ## About AskPoly
 
-AskPoly is an AI-powered sentiment analysis platform that transforms real-time social media conversations into actionable product insights. By analyzing millions of discussions across Reddit, X (Twitter), YouTube, and Amazon Reviews, AskPoly helps businesses, researchers, and consumers understand authentic public opinion about products, brands, and market trends.
+AskPoly is an AI-powered sentiment analysis platform that transforms real-time social media conversations into actionable product insights. By analyzing millions of discussions across Reddit, X (Twitter), YouTube, Amazon Reviews, and Best Buy, AskPoly helps businesses, researchers, and consumers understand authentic public opinion about products, brands, and market trends.
 
 Our platform uses advanced natural language processing and machine learning to:
 - **Analyze sentiment** across multiple social platforms in real-time
@@ -193,6 +193,7 @@ All four query APIs support MCP service-key authentication:
 
 ### Important Notes
 
+- **Cross-Source Convergence**: Querying a product by name, ASIN, Best Buy SKU, or URL all resolve to the same canonical product and return the same sentiment data. No more fragmented results across different product identifiers.
 - **Same Endpoints, Same Responses**: All four query APIs (ASK, COMPARE, RECOMMEND, THINK) work identically with all authentication methods
 - **Same Credit Usage**: Credit deduction is identical for JWT and API key methods
 - **MCP Service Key**: For AI agent integrations (ChatGPT MCP, Cursor, third-party agents), use the MCP service key method. All three headers (`X-ASKPOLY-SERVICE-KEY`, `X-ASKPOLY-MCP-IDENTITY`, `X-ASKPOLY-REQUEST-ID`) are required together. MCP requests bypass credit consumption.
@@ -307,7 +308,7 @@ The ASK API is your go-to endpoint for quick sentiment analysis about any produc
 - Trending indicators and momentum
 - Platform-specific sentiment breakdown
 - Source transparency with post counts, platform breakdown, and confidence indicators
-- Deterministic product resolution via ASIN/URL (Amazon and non-Amazon retailers)
+- Deterministic product resolution via ASIN, Best Buy SKU, URL, or natural language -- all query types for the same product converge to the same canonical result
 
 Perfect for: Product managers monitoring launches, marketers tracking brand perception, or consumers researching purchases.
 
@@ -324,8 +325,8 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
 ### Parameters
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| query | string | Yes | Product or brand name to analyze (1-500 characters) |
-| product_url | string | No | Product URL or raw 10-character ASIN for deterministic product resolution. When provided, bypasses AI-based product detection and resolves the exact product from our database. Accepted formats: Amazon URL (`https://www.amazon.com/dp/B0CHWT34ZD`), Amazon URL with slug, international Amazon domains, raw ASIN (`B0CHWT34ZD`), or non-Amazon retailer URLs (Best Buy, Walmart, Target, etc.). Non-Amazon URLs are matched by URL fingerprint to existing discovery records. |
+| query | string | Yes | Product or brand name to analyze (1-500 characters). Supports natural language ("AirPods Pro 3"), Amazon ASINs, Best Buy SKUs, or any product identifier. All query types resolve to the same canonical product via entity resolution. |
+| product_url | string | No | Product URL, raw 10-character ASIN, or Best Buy SKU for deterministic product resolution. When provided, bypasses AI-based product detection and resolves the exact product from our database. Accepted formats: Amazon URL (`https://www.amazon.com/dp/B0CHWT34ZD`), Amazon URL with slug, international Amazon domains, raw ASIN (`B0CHWT34ZD`), Best Buy URL (`https://www.bestbuy.com/site/product/6505727.p`), Best Buy SKU (`6505727`), or other retailer URLs (Walmart, Target, etc.). Non-Amazon URLs are matched by URL fingerprint to existing discovery records. |
 | session_id | string | No | Session ID for multi-turn conversations |
 
 **ASIN/URL Resolution Behavior:**
@@ -441,7 +442,7 @@ Perfect for: Product managers monitoring launches, marketers tracking brand perc
   "credits_remaining": 99,
   "metadata": {
     "processing_time_ms": 2150,
-    "data_sources_queried": ["reddit", "x", "youtube"],
+    "data_sources_queried": ["reddit", "x", "youtube", "amazon", "bestbuy"],
     "cache_hit": false
   }
 }
@@ -759,7 +760,7 @@ Perfect for: Data verification, auditing analysis results, building trust with e
 | `query_id` | string (UUID) | The query this source data belongs to |
 | `sources` | array | List of source posts (max 100) |
 | `sources[].post_id` | string (UUID) | Unique post identifier |
-| `sources[].platform` | string | Source platform: `reddit`, `x`, `youtube`, `amazon` |
+| `sources[].platform` | string | Source platform: `reddit`, `x`, `youtube`, `amazon`, `bestbuy` |
 | `sources[].url` | string | Direct link to the original post (empty string if unavailable) |
 | `sources[].content_snippet` | string | First 300 characters of post content (truncated with "...") |
 | `sources[].date` | string (ISO 8601) or null | Post publication date |
@@ -847,8 +848,8 @@ Perfect for: Competitive analysis, purchase decisions between alternatives, or m
 |-------|------|----------|-------------|
 | product1 | string | Conditional | First product name (1-200 characters). Required if `product1_url` is not provided. |
 | product2 | string | Conditional | Second product name (1-200 characters). Required if `product2_url` is not provided. |
-| product1_url | string | No | Product URL or ASIN for first product. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, or non-Amazon retailer URLs). When provided, `product1` name is optional. |
-| product2_url | string | No | Product URL or ASIN for second product. Same format as `product1_url`. When provided, `product2` name is optional. |
+| product1_url | string | No | Product URL, ASIN, or Best Buy SKU for first product. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, Best Buy URLs/SKUs, or other retailer URLs). When provided, `product1` name is optional. |
+| product2_url | string | No | Product URL, ASIN, or Best Buy SKU for second product. Same format as `product1_url`. When provided, `product2` name is optional. |
 | session_id | string | No | Optional session ID for tracking related queries |
 | impression_id | string | No | Optional impression tracking ID for analytics |
 | request_id | string | No | Frontend-generated request ID (ULID) for progress tracking and idempotency. Prevents duplicate processing if the same request is retried. |
@@ -1237,7 +1238,7 @@ Perfect for: Market research, investment analysis, strategic planning, trend rep
 |-------|------|----------|-------------|
 | query | string | Conditional | Complex question or analysis request (10-1000 characters). Required if `product_url` is not provided. |
 | session_id | string | No | Optional session ID for tracking related queries |
-| product_url | string | No | Product URL or ASIN for deterministic product resolution. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, or non-Amazon retailer URLs). When provided, `query` is optional. |
+| product_url | string | No | Product URL, ASIN, or Best Buy SKU for deterministic product resolution. Same format as ASK API `product_url` (Amazon URLs, raw ASIN, Best Buy URLs/SKUs, or other retailer URLs). When provided, `query` is optional. |
 
 ### Response Structure
 ```json
@@ -2090,6 +2091,12 @@ When reporting issues, please include:
 ---
 
 ## Changelog
+
+### v2.14.0 (March 2026)
+- **Canonical Entity Resolution**: All query types (ASIN, Best Buy SKU, product URL, natural language) now resolve to the same canonical product via a unified entity resolution layer. Querying "AirPods Pro" by name, ASIN, Best Buy SKU, or Amazon URL all return identical sentiment data.
+- **Cross-Source Product Convergence**: Duplicate product records from different sources (e.g., same product discovered via Amazon and Best Buy) are automatically merged. All historical sentiment data, reviews, and posts are consolidated under a single canonical product.
+- **Best Buy First-Class Integration**: Best Buy is now a first-class data source alongside Amazon. Best Buy SKUs and URLs are accepted in `product_url` fields across all APIs. Best Buy product reviews and pricing data are included in sentiment analysis.
+- **Canonical Key System**: Products are identified by a normalized `brand|family|model` key (e.g., `apple|airpods|pro`), enabling consistent resolution regardless of how the product is referenced. A unique index enforces one canonical record per product.
 
 ### v2.13.1 (February 2026)
 - **Post-Discovery Cleanup**: Removed dead `_register_unknown_product` code path from Compare API. Fixed async race condition on `discovery_queued` flag (fire-and-forget replaced with await + timeout). Threaded `trigger_source` through entire crawl pipeline for end-to-end observability.
